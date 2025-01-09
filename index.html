@@ -36,7 +36,7 @@
     </style>
 </head>
 <body>
-    <button id="connect-button">Connect Microbit</button>
+    <button id="connect-button">Connect Controller</button>
     <div id="game-container">
         <div id="game"></div>
     </div>
@@ -252,7 +252,7 @@
                 document.getElementById('connect-button').style.backgroundColor = '#2E7D32';
             } catch (error) {
                 console.error('Bluetooth Error:', error);
-                alert('Error connecting to Microbit');
+                alert('Error connecting to controller');
             }
         }
 
