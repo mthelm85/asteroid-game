@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Space Avoider</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.70.0/phaser.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #000;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        #connect-button {
+            margin: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        #game-container {
+            position: relative;
+        }
+        #score-display {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 24px;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <button id="connect-button">Connect Microbit</button>
+    <div id="game-container">
+        <div id="game"></div>
+    </div>
+
+    <script>
+        // Bluetooth UUIDs
+        const BINARY_SENSOR_SERVICE_UUID = '0000183b-0000-1000-8000-00805f9b34fb';
+        const BUTTON_CHAR_UUID = '0000ff01-0000-1000-8000-00805f9b34fb';
+        
+        let device = null;
+        let buttonChar = null;
+
+        class GameScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameScene' });
+                this.score = 0;
+                this.gameSpeed = 300;
+                this.gameOver = false;
+            }
+
+            preload() {
+                this.load.audio('boom', 'explosion.wav');
+                // Load ship from local file
+                this.load.image('ship', 'ship.png');
+                // Still using placeholders for other assets
+                this.load.image('asteroid', 'asteroid.png');
+                this.load.image('background', 'bg.jpg');
+                this.load.spritesheet('explosion', 
+                    'explosion.png',
+                    { 
+                        frameWidth: 195, 
+                        frameHeight: 190   
+                    }
+                );
+            }
+
+            create() {
+                // Create explosion animation
+                this.anims.create({
+                    key: 'explode',
+                    frames: this.anims.generateFrameNumbers('explosion', { start: 0, end: 12 }), // Adjust end frame based on your sprite sheet
+                    frameRate: 24,
+                    hideOnComplete: true
+                });
+
+                // Scrolling background
+                this.background = this.add.tileSprite(400, 300, 800, 600, 'background');
+
+                // Player ship with physics
+                this.ship = this.physics.add.sprite(400, 500, 'ship');
+                this.ship.setScale(0.2); // Reduced from 0.8 to 0.2
+                this.ship.setCollideWorldBounds(true);
+
+                // Score text
+                this.scoreText = this.add.text(16, 16, 'Score: 0', { 
+                    fontSize: '32px', 
+                    fill: '#fff' 
+                });
+
+                // Movement state
+                this.moveDirection = 0; // -1 for left, 0 for none, 1 for right
+
+                // Initialize asteroid group
+                this.asteroids = this.add.group();
+
+                // Timer for spawning asteroids
+                this.time.addEvent({
+                    delay: 1000,
+                    callback: this.spawnAsteroid,
+                    callbackScope: this,
+                    loop: true
+                });
+
+                // Increase game speed over time
+                this.time.addEvent({
+                    delay: 10000,
+                    callback: this.increaseSpeed,
+                    callbackScope: this,
+                    loop: true
+                });
+            }
+
+            spawnAsteroid() {
+                if (this.gameOver) return;
+
+                const x = Phaser.Math.Between(50, 750);
+                const asteroid = this.add.sprite(x, -50, 'asteroid');
+                this.asteroids.add(asteroid);
+                
+                // Set random rotation and scale (made asteroids smaller)
+                asteroid.setScale(Phaser.Math.FloatBetween(0.35, 0.55));
+                asteroid.rotation = Phaser.Math.FloatBetween(0, Math.PI * 2);
+
+                // Add physics properties
+                this.tweens.add({
+                    targets: asteroid,
+                    y: 650,
+                    duration: this.gameSpeed * 5,
+                    ease: 'Linear',
+                    onComplete: () => {
+                        asteroid.destroy();
+                        if (!this.gameOver) this.score += 1;
+                        this.scoreText.setText('Score: ' + this.score);
+                    }
+                });
+            }
+
+            increaseSpeed() {
+                if (this.gameSpeed > 500) {  // Won't get faster than this
+                    this.gameSpeed -= 5;     // Much smaller speed increase
+                }
+            }
+
+            update() {
+                if (this.gameOver) return;
+
+                // Rotate background for space effect
+                this.background.tilePositionY -= 2;
+
+                // Update ship movement
+                const speed = 300;
+                this.ship.setVelocityX(this.moveDirection * speed);
+
+                // Check for collisions
+                this.asteroids.getChildren().forEach(asteroid => {
+                    if (Phaser.Geom.Intersects.RectangleToRectangle(
+                        this.ship.getBounds(),
+                        asteroid.getBounds()
+                    )) {
+                        this.gameOver = true;
+                        this.ship.setVelocity(0, 0);  // Stop ship movement immediately
+                        this.moveDirection = 0;        // Reset movement direction
+                        
+                        // Create explosion at ship's position
+                        let explosion = this.add.sprite(this.ship.x, this.ship.y, 'explosion');
+                        this.sound.play('boom');
+                        explosion.play('explode');
+                        
+                        // Hide the ship
+                        this.ship.setVisible(false);
+                        
+                        this.handleGameOver();
+                    }
+                });
+            }
+
+            handleGameOver() {
+                this.ship.setVelocity(0, 0);  // Stop the ship's movement
+                this.moveDirection = 0;  // Reset movement direction
+                
+                this.add.text(400, 300, 'Game Over!\nScore: ' + this.score, {
+                    fontSize: '64px',
+                    fill: '#ff0000',
+                    align: 'center'
+                }).setOrigin(0.5);
+
+                this.time.addEvent({
+                    delay: 3000,
+                    callback: this.restartGame,
+                    callbackScope: this,
+                    loop: false
+                });
+            }
+
+            restartGame() {
+                this.scene.restart();
+                this.gameOver = false;
+                this.score = 0;
+                this.gameSpeed = 300;
+                this.ship.setVisible(true);  // Make sure ship is visible on restart
+            }
+
+            moveShip(direction) {
+                if (this.gameOver) return;
+                this.moveDirection = direction;
+            }
+        }
+
+        const config = {
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            parent: 'game',
+            backgroundColor: '#000000',
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    debug: false
+                }
+            },
+            scene: GameScene
+        };
+
+        const game = new Phaser.Game(config);
+
+        // Bluetooth connection handler
+        async function connectMicrobit() {
+            try {
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{
+                        services: [BINARY_SENSOR_SERVICE_UUID]
+                    }]
+                });
+
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(BINARY_SENSOR_SERVICE_UUID);
+                buttonChar = await service.getCharacteristic(BUTTON_CHAR_UUID);
+
+                await buttonChar.startNotifications();
+                buttonChar.addEventListener('characteristicvaluechanged', handleButtonPress);
+
+                document.getElementById('connect-button').textContent = 'Connected!';
+                document.getElementById('connect-button').style.backgroundColor = '#2E7D32';
+            } catch (error) {
+                console.error('Bluetooth Error:', error);
+                alert('Error connecting to Microbit');
+            }
+        }
+
+        // Handle button presses from Microbit
+        function handleButtonPress(event) {
+            const value = event.target.value.getUint8(0);
+            const buttonA = value & 0x01;
+            const buttonB = value & 0x02;
+            
+            const scene = game.scene.scenes[0];
+            
+            if (buttonA && !buttonB) {
+                scene.moveShip(-1); // Move left
+            } else if (buttonB && !buttonA) {
+                scene.moveShip(1);  // Move right
+            } else {
+                scene.moveShip(0);  // Stop moving
+            }
+        }
+
+        // Connect button event listener
+        document.getElementById('connect-button').addEventListener('click', connectMicrobit);
+    </script>
+</body>
+</html>
